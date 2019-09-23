@@ -30,6 +30,8 @@
     "lodash.merge": "^4.6.2",
     "nanoid": "^2.1.8",
     "passport": "^0.4.1",
+    "multer": "^1.4.2",
+    "neat-csv": "^5.1.0",
     "passport-anonymous": "^1.0.1",
     "pg": "^7.17.0",
     "pg-hstore": "^2.3.3",
