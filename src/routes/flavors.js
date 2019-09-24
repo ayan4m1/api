@@ -1,4 +1,9 @@
+import multer from 'multer';
+import neatCsv from 'neat-csv';
 import { Router } from 'express';
+import getStream from 'get-stream';
+import Sequelize from 'sequelize';
+import { createReadStream } from 'fs';
 import { query, validationResult } from 'express-validator';
 
 import { authenticate } from 'modules/auth';
@@ -6,8 +11,12 @@ import models from 'modules/database';
 import loggers from 'modules/logging';
 
 const router = Router();
+const { Op } = Sequelize;
 const log = loggers('flavors');
-const { Flavor, Vendor } = models;
+const { Flavor, Vendor, UsersFlavors } = models;
+
+const uploads = multer({ dest: './uploads' });
+const importNameRegex = /(.*) \(([a-z0-9]+)\)/i;
 
 /**
  * GET Flavors
@@ -60,6 +69,114 @@ router.get(
       log.error(error.message);
       res.status(500).send(error.message);
     }
+  }
+);
+/**
+ * Import flavor stash CSV
+ */
+router.put(
+  '/import',
+  authenticate(),
+  uploads.single('csv'),
+  async (req, res) => {
+    if (!req.file) {
+      return res.status(400).end();
+    }
+
+    const { size, path } = req.file;
+
+    if (size > 256000) {
+      return res.status(413).end();
+    }
+
+    try {
+      const stream = createReadStream(path);
+      const data = await getStream(stream);
+      const parsed = await neatCsv(data, {
+        separator: ';'
+      });
+      const vendorCache = [];
+
+      let insertCount = 0;
+
+      for (const entry of parsed) {
+        const { Flavor: rawName } = entry;
+        const matches = rawName.match(importNameRegex);
+
+        if (!matches) {
+          continue;
+        }
+
+        const [, name, rawVendor] = matches;
+        const vendorSlug = rawVendor.toLowerCase();
+
+        let vendor = vendorCache.find(vend => vend.code === vendorSlug);
+
+        if (!vendor) {
+          vendor = await Vendor.findOne({
+            where: {
+              [Op.or]: {
+                code: Sequelize.where(
+                  Sequelize.fn('lower', Sequelize.col('code')),
+                  '=',
+                  vendorSlug
+                ),
+                name: Sequelize.where(
+                  Sequelize.fn('lower', Sequelize.col('name')),
+                  '=',
+                  vendorSlug
+                )
+              }
+            }
+          });
+
+          if (!vendor) {
+            log.warn(`Failed to find ${vendorSlug}`);
+            continue;
+          }
+
+          vendorCache.push(vendor);
+        }
+
+        const flavor = await Flavor.findOne({
+          where: {
+            [Op.and]: {
+              name: {
+                [Op.iLike]: `%${name}%`
+              },
+              vendorId: vendor.id
+            }
+          }
+        });
+
+        if (!flavor) {
+          log.warn(`Failed to find ${name}`);
+          continue;
+        }
+
+        try {
+          await UsersFlavors.create({
+            userId: req.user.id,
+            flavorId: flavor.id
+          });
+        } catch (error) {
+          log.error(error.message);
+        }
+        insertCount++;
+      }
+
+      const successPercentage = ((insertCount / parsed.length) * 100).toFixed(
+        2
+      );
+
+      log.info(
+        `Successfully imported ${successPercentage}% of ${parsed.length} records!`
+      );
+    } catch (error) {
+      log.error(error.message);
+    }
+
+    res.status(204).end();
   }
 );
 
