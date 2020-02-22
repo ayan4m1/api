@@ -13,8 +13,14 @@ import {
 const router = Router();
 const { Preference } = models;
 
+/**
+ * GET Preferences
+ */
 router.get('/', authenticate(), handleFindAll(Preference));
 
+/**
+ * GET Preference
+ */
 router.get(
   '/:id',
   authenticate(),
@@ -31,12 +37,6 @@ router.get(
     }
   }))
 );
-
-router.post('/');
-
-router.put('/');
-
-router.delete('/:id');
 
 /**
  * GET Preference Count
