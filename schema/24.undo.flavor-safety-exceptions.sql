@@ -1,0 +1,2 @@
+alter table flavors_ingredients drop constraint fk3_flavors_ingredients;
+alter table flavors_ingredients drop ingredient_category_id;
